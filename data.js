@@ -8,7 +8,7 @@
 ============================================================ */
 
 const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxWDVNfFSpC_qigYG7TLW0Oj11upPS6z9esINJC6ZpmKvKPGnRNEhDk1P7zD42ryw/exec",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxLTxpF66DOhH_kPmhT6wVpNU_94uCPN9FRHxuRQFmZaRXK8yS188rjFJ2JdmigdnmU/exec",
 };
 
 const CATEGORIES = ["Cadets", "Seniors Hommes", "Seniors Dames"];
