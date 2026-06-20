@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>District Basket Raiatea</title>
+<meta name="description" content="Calendrier, classements, clubs et planning salle du District de Basketball de Raiatea, Iles Sous-le-Vent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <div>
+        <div class="brand-name">District Basket</div>
+        <div class="brand-sub">Raiatea · Iles Sous-le-Vent</div>
+      </div>
+    </div>
+    <button id="adminToggle" class="admin-btn" title="Espace bureau">Espace bureau</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="championnat">Championnat</button>
+    <button class="tab" data-tab="salle">Salle</button>
+    <button class="tab" data-tab="clubs">Clubs</button>
+    <button class="tab" data-tab="classement">Classement</button>
+    <button class="tab" data-tab="annonces">Annonces</button>
+  </nav>
+</header>
+
+<main id="app">
+  <div class="loader" id="loader">Chargement des données…</div>
+</main>
+
+<div id="loginModal" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="modal-close" id="loginClose">&times;</button>
+    <h3>Espace bureau du district</h3>
+    <p class="modal-hint">Mot de passe requis pour ajouter ou modifier des données.</p>
+    <input type="password" id="loginPassword" placeholder="Mot de passe" class="input">
+    <div id="loginError" class="error-text hidden">Mot de passe incorrect.</div>
+    <button id="loginSubmit" class="btn-primary">Se connecter</button>
+  </div>
+</div>
+
+<footer class="site-footer">
+  District de Basketball de Raiatea — Iles Sous-le-Vent
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
