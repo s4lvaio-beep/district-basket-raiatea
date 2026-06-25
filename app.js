@@ -60,6 +60,9 @@ async function refreshFromSheet() {
   const remote = await apiLoad();
   if (remote && remote.ok) {
     STATE.data = remote.data;
+    if (!STATE.data.playoffs) {
+      STATE.data.playoffs = JSON.parse(JSON.stringify(DEFAULT_DATA.playoffs));
+    }
     STATE.online = true;
   } else {
     STATE.online = false;
@@ -161,6 +164,7 @@ function render() {
 
   const renderers = {
     championnat: renderChampionnat,
+    playoffs: renderPlayoffs,
     salle: renderSalle,
     clubs: renderClubs,
     classement: renderClassement,
@@ -171,6 +175,22 @@ function render() {
 }
 
 /* ---------------- Championnat ---------------- */
+
+function computeChampionnatStandings(matches) {
+  const table = {};
+  const ensure = (team) => (table[team] = table[team] || { team, played: 0, wins: 0, losses: 0, points: 0, diff: 0 });
+  matches.forEach((m) => {
+    if (m.scoreDomicile === "" || m.scoreDomicile === undefined || m.scoreDomicile === null) return;
+    if (m.scoreExterieur === "" || m.scoreExterieur === undefined || m.scoreExterieur === null) return;
+    const sa = Number(m.scoreDomicile), sb = Number(m.scoreExterieur);
+    const a = ensure(m.domicile), b = ensure(m.exterieur);
+    a.played++; b.played++;
+    a.diff += (sa - sb); b.diff += (sb - sa);
+    if (sa > sb) { a.wins++; a.points += 2; b.losses++; b.points += 1; }
+    else if (sb > sa) { b.wins++; b.points += 2; a.losses++; a.points += 1; }
+  });
+  return Object.values(table).sort((x, y) => y.points - x.points || y.diff - x.diff);
+}
 
 function renderChampionnat() {
   const matches = STATE.data.championnat || [];
@@ -184,12 +204,34 @@ function renderChampionnat() {
     grouped[grouped.length - 1].items.push(m);
   });
 
+  const standings = computeChampionnatStandings(matches);
+
   let html = `
     <div class="section-head">
       <div class="section-title">Championnat du vendredi (5 équipes)</div>
     </div>
     <p class="section-note">Saison 2026/2027 · Salle de Uturoa · ${matches.length} matchs sur ${grouped.length} journées</p>
   `;
+
+  html += `<div class="section-head"><div class="section-title">Classement phase régulière</div></div>`;
+  if (standings.length === 0) {
+    html += `<div class="empty">Aucun score saisi pour le moment.</div>`;
+  } else {
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>Équipe</th><th class="tcenter">J</th><th class="tcenter">V</th><th class="tcenter">D</th><th class="tcenter">+/-</th><th class="tcenter">Pts</th>
+    </tr></thead><tbody>`;
+    standings.forEach((s, i) => {
+      html += `<tr><td><strong>${i + 1}. ${escapeHtml(s.team)}</strong></td>
+        <td class="tcenter">${s.played}</td><td class="tcenter" style="color:var(--good)">${s.wins}</td>
+        <td class="tcenter" style="color:var(--bad)">${s.losses}</td>
+        <td class="tcenter">${s.diff > 0 ? "+" : ""}${s.diff}</td>
+        <td class="tcenter" style="color:var(--accent); font-weight:800">${s.points}</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+    if (standings.length < 5) {
+      html += `<p class="section-note" style="margin-top:-14px;">Le classement complet (5 équipes) apparaît au fur et à mesure que les scores sont saisis.</p>`;
+    }
+  }
 
   grouped.forEach((g) => {
     const isTreve = g.journee.includes("TRÊVE");
@@ -199,10 +241,17 @@ function renderChampionnat() {
         <div class="card match-row" data-id="${m.id}">
           <div class="match-date">${fmtDate(m.date)}<br>${escapeHtml(m.heure || "")}</div>
           <div class="match-teams">
-            <strong>${escapeHtml(m.domicile)}</strong> <span class="muted-sm">vs</span> <strong>${escapeHtml(m.exterieur)}</strong>
+            <div class="score-team-row">
+              <span>${escapeHtml(m.domicile)}</span>
+              <input type="number" min="0" class="score-input match-score" data-id="${m.id}" data-side="scoreDomicile" placeholder="-" value="${escapeHtml(m.scoreDomicile ?? "")}" ${STATE.isAdmin ? "" : "disabled"}>
+            </div>
+            <div class="score-team-row">
+              <span>${escapeHtml(m.exterieur)}</span>
+              <input type="number" min="0" class="score-input match-score" data-id="${m.id}" data-side="scoreExterieur" placeholder="-" value="${escapeHtml(m.scoreExterieur ?? "")}" ${STATE.isAdmin ? "" : "disabled"}>
+            </div>
             ${m.exempte && m.exempte !== "-" ? `<div class="match-bye">Exempte : ${escapeHtml(m.exempte)}</div>` : ""}
+            ${renderSalleField(m.id, m.salle, "match-salle", STATE.isAdmin)}
           </div>
-          <input class="score-input match-score" data-id="${m.id}" placeholder="Score" value="${escapeHtml(m.score || "")}" ${STATE.isAdmin ? "" : "disabled"}>
         </div>
       `;
     });
@@ -213,16 +262,188 @@ function renderChampionnat() {
   document.querySelectorAll(".match-score").forEach((input) => {
     input.addEventListener("change", async (e) => {
       const id = e.target.dataset.id;
-      const score = e.target.value;
+      const side = e.target.dataset.side;
+      const value = e.target.value;
       const m = STATE.data.championnat.find((x) => x.id === id);
-      if (m) m.score = score;
-      const res = await apiWrite("updateMatch", { id, score });
-      if (!res.ok) console.warn("Échec sauvegarde score");
+      if (m) m[side] = value;
+      const res = await apiWrite("updateMatch", { id, [side]: value });
+      if (!res.ok) { console.warn("Échec sauvegarde score"); return; }
+      render();
+    });
+  });
+
+  document.querySelectorAll(".match-salle").forEach((select) => {
+    select.addEventListener("change", async (e) => {
+      const id = e.target.dataset.id;
+      const salle = e.target.value;
+      const m = STATE.data.championnat.find((x) => x.id === id);
+      if (m) m.salle = salle;
+      const res = await apiWrite("updateMatch", { id, salle });
+      if (!res.ok) console.warn("Échec sauvegarde salle");
     });
   });
 }
 
-/* ---------------- Salle ---------------- */
+/* ---------------- Salle (sélecteur réutilisable) ---------------- */
+
+function renderSalleField(id, currentSalle, cssClass, isAdmin) {
+  if (!isAdmin) {
+    return `<div class="muted-sm match-salle-display">📍 ${escapeHtml(currentSalle || SALLES[0])}</div>`;
+  }
+  const options = SALLES.map((s) => `<option value="${escapeHtml(s)}" ${currentSalle === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("");
+  return `<select class="input ${cssClass}" data-id="${id}" style="margin: 6px 0 0; padding: 6px 10px; font-size:0.78rem;">${options}</select>`;
+}
+
+/* ---------------- Playoffs ---------------- */
+
+function getPlayoffSeeding(matches) {
+  // Classement de la phase régulière, dans l'ordre 1er -> 5e
+  return computeChampionnatStandings(matches).map((s) => s.team);
+}
+
+function winner(po, key) {
+  const m = po[key];
+  if (!m || m.scoreA === "" || m.scoreB === "" || m.scoreA === undefined || m.scoreB === undefined) return null;
+  const sa = Number(m.scoreA), sb = Number(m.scoreB);
+  if (sa === sb) return null;
+  return sa > sb ? m.equipeA : m.equipeB;
+}
+function loser(po, key) {
+  const m = po[key];
+  const w = winner(po, key);
+  if (!w) return null;
+  return w === m.equipeA ? m.equipeB : m.equipeA;
+}
+
+function syncPlayoffTeams(seeding) {
+  const po = STATE.data.playoffs;
+  if (!po) return;
+  if (seeding.length < 5) return; // classement pas encore complet
+
+  const [s1, s2, s3, s4, s5] = seeding;
+
+  // Quarts (figés une fois le classement complet)
+  if (!po.quart1.equipeA) { po.quart1.equipeA = s2; po.quart1.equipeB = s5; }
+  if (!po.quart2.equipeA) { po.quart2.equipeA = s3; po.quart2.equipeB = s4; }
+
+  // Repêchage : perdants des deux quarts
+  const lq1 = loser(po, "quart1"), lq2 = loser(po, "quart2");
+  if (lq1 && lq2) { po.repechage.equipeA = lq1; po.repechage.equipeB = lq2; }
+
+  // Demi-finale 1 : exempté (1er) vs vainqueur du repêchage
+  const wRep = winner(po, "repechage");
+  po.demi1.equipeA = s1;
+  if (wRep) po.demi1.equipeB = wRep;
+
+  // Demi-finale 2 : vainqueurs des deux quarts
+  const wq1 = winner(po, "quart1"), wq2 = winner(po, "quart2");
+  if (wq1) po.demi2.equipeA = wq1;
+  if (wq2) po.demi2.equipeB = wq2;
+
+  // Finale (meilleur des 3) : vainqueurs des demies
+  const wd1 = winner(po, "demi1"), wd2 = winner(po, "demi2");
+  if (wd1) { po.finaleM1.equipeA = wd1; po.finaleM2.equipeA = wd1; po.finaleM3.equipeA = wd1; }
+  if (wd2) { po.finaleM1.equipeB = wd2; po.finaleM2.equipeB = wd2; po.finaleM3.equipeB = wd2; }
+}
+
+function finaleSeriesStatus(po) {
+  const w1 = winner(po, "finaleM1"), w2 = winner(po, "finaleM2"), w3 = winner(po, "finaleM3");
+  const wins = {};
+  [w1, w2, w3].forEach((w) => { if (w) wins[w] = (wins[w] || 0) + 1; });
+  const champion = Object.keys(wins).find((t) => wins[t] >= 2) || null;
+  const needsMatch3 = !!w1 && !!w2 && w1 !== w2 && !champion;
+  return { wins, champion, needsMatch3 };
+}
+
+function renderPlayoffMatchCard(po, key, opts = {}) {
+  const m = po[key];
+  const locked = opts.locked || !m.equipeA || !m.equipeB;
+  return `
+    <div class="card po-card">
+      <div class="eyebrow">${escapeHtml(m.label)}</div>
+      ${locked && (!m.equipeA || !m.equipeB) ? `
+        <div class="muted-sm" style="margin-top:4px;">En attente des équipes qualifiées</div>
+      ` : `
+        <div class="po-team-row">
+          <span>${escapeHtml(m.equipeA)}</span>
+          <input type="number" min="0" class="score-input po-score" data-key="${key}" data-side="scoreA" value="${escapeHtml(m.scoreA ?? "")}" placeholder="-" ${STATE.isAdmin ? "" : "disabled"}>
+        </div>
+        <div class="po-team-row">
+          <span>${escapeHtml(m.equipeB)}</span>
+          <input type="number" min="0" class="score-input po-score" data-key="${key}" data-side="scoreB" value="${escapeHtml(m.scoreB ?? "")}" placeholder="-" ${STATE.isAdmin ? "" : "disabled"}>
+        </div>
+        ${renderSalleField(key, m.salle, "po-salle", STATE.isAdmin)}
+      `}
+    </div>
+  `;
+}
+
+function renderPlayoffs() {
+  const matches = STATE.data.championnat || [];
+  const seeding = getPlayoffSeeding(matches);
+  syncPlayoffTeams(seeding);
+  const po = STATE.data.playoffs;
+
+  let html = `<div class="section-head"><div class="section-title">Playoffs</div></div>`;
+
+  if (seeding.length < 5) {
+    html += `<div class="empty">Les playoffs se déclencheront une fois tous les matchs de phase régulière saisis (classement à 5 équipes complet).</div>`;
+    $app.innerHTML = html;
+    return;
+  }
+
+  html += `<p class="section-note">1ère place exemptée des quarts · Finale au meilleur des 3 matchs</p>`;
+
+  html += `<div class="day-group-label">Quarts de finale</div>`;
+  html += renderPlayoffMatchCard(po, "quart1");
+  html += renderPlayoffMatchCard(po, "quart2");
+
+  html += `<div class="day-group-label">Repêchage (perdants des quarts)</div>`;
+  html += renderPlayoffMatchCard(po, "repechage");
+
+  html += `<div class="day-group-label">Demi-finales</div>`;
+  html += renderPlayoffMatchCard(po, "demi1");
+  html += renderPlayoffMatchCard(po, "demi2");
+
+  html += `<div class="day-group-label">Finale (au meilleur des 3)</div>`;
+  html += renderPlayoffMatchCard(po, "finaleM1");
+  html += renderPlayoffMatchCard(po, "finaleM2");
+
+  const { champion, needsMatch3 } = finaleSeriesStatus(po);
+  if (needsMatch3 || (po.finaleM3.scoreA !== "" && po.finaleM3.scoreA !== undefined)) {
+    html += renderPlayoffMatchCard(po, "finaleM3");
+  }
+
+  if (champion) {
+    html += `<div class="alert" style="background:#1F3320; border-color:#2A4A2E; color:var(--good);">🏆 Champion du district : <strong>${escapeHtml(champion)}</strong></div>`;
+  }
+
+  $app.innerHTML = html;
+
+  document.querySelectorAll(".po-score").forEach((input) => {
+    input.addEventListener("change", async (e) => {
+      const key = e.target.dataset.key;
+      const side = e.target.dataset.side;
+      const value = e.target.value;
+      STATE.data.playoffs[key][side] = value;
+      const res = await apiWrite("updatePlayoffMatch", { key, [side]: value, equipeA: STATE.data.playoffs[key].equipeA, equipeB: STATE.data.playoffs[key].equipeB });
+      if (!res.ok) console.warn("Échec sauvegarde score playoff");
+      render();
+    });
+  });
+
+  document.querySelectorAll(".po-salle").forEach((select) => {
+    select.addEventListener("change", async (e) => {
+      const key = e.target.dataset.id;
+      const salle = e.target.value;
+      STATE.data.playoffs[key].salle = salle;
+      const res = await apiWrite("updatePlayoffMatch", { key, salle, equipeA: STATE.data.playoffs[key].equipeA, equipeB: STATE.data.playoffs[key].equipeB });
+      if (!res.ok) console.warn("Échec sauvegarde salle playoff");
+    });
+  });
+}
+
+/* ---------------- Planning de la salle omnisports (créneaux hebdo) ---------------- */
 
 function renderSalle() {
   const slots = STATE.data.salle || [];
